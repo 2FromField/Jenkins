@@ -100,6 +100,11 @@ OpenJDK 64-Bit Server VM (build 21.0.3+11-Debian-2, mixed mode, sharing)
 - Nom complet : `admin`
 - Adresse email: `admin@example.fr`
 
+11) Plugins recommandés:
+- **Role-based Authorization Strategy** (gestion des rôles)
+- **Delivery Pipeline** (affichage des pipelines en mode CI/CD)
+
+
 ## Cas pratique
 Lien [Youtube](https://www.youtube.com/watch?v=Gy4Nk2pIuNs&list=PLn6POgpklwWr19VXuoVgIr32HCu0MGNt9&index=3)
 
@@ -116,6 +121,19 @@ Lien [Youtube](https://www.youtube.com/watch?v=Gy4Nk2pIuNs&list=PLn6POgpklwWr19V
 - Sortie de la console
 - Changements induits
 
+### Paramètres des jobs :
+- Mot de passe : masquée lors de la saisie
+- String : classique
+- Booléen : True/False (case à cochée)
+- Choix : liste déroulante
+- Paramètre d'exécution
+- Identifiants : gestion des secrets
+- Texte
+- Fichiers (ex: import fichier)
+
+_Exemple_ :
+- Défintion d'un "Mot de passe" (Nom/Valeur) pouvant être appelé dans un script shell tel que ` echo $MDP_NAME`
+- Définition d'un emplacement de fichier avec comme valeur `tmp/fichier.txt` et en renseignant un fichier lors du build puis d'en afficher le contenu (commande shell : `mkdir -p tmp` et `cat tmp/fichier.txt`).
 
 ### Les types de Job
 1. **Freestyle** : job générique configurable depuis l'interface graphique afin d'exécuter des tâches simples. Il permet de définir une série d'étapes à exécuter sur ton code source, comme:
@@ -134,26 +152,78 @@ Cas d'usages :
 - Utilisation dans des processus DevOps complexes où tu as des étapes comme _build, test, deploy, etc_, définies dans un fichier versionné (le Jenkinsfile).
 - Création de pipelines multibranches où chaque branche du dépôt Git a son propre pipeline
 
-Exemple de Jenkinsfile :
+Exemple de Jenkinsfile assurant plusieurs actions:
+1) Cloner le dépôt Git
+2) Vérifier (tester) un fichier `.sh` pour s'assurer qu'il est exécutable et q'il fonctionne correctement
+3) Exécuter ce même fichier `.sh`
+4) Pusher les modifications sur le dépôt Git récupérer initialement
 ```
 # groovy
 pipeline {
-    agent any
+    agent any  // Ce pipeline peut être exécuté sur n'importe quel agent
+
+    environment {
+        GIT_REPO = 'https://github.com/ton-utilisateur/ton-repository.git' // URL du dépôt
+        BRANCH = 'main' // Branche du dépôt Git à utiliser
+    }
+
     stages {
-        stage('Build') {
+        stage('Clone Repository') {
             steps {
-                sh 'mvn clean install'
+                script {
+                    // Cloner le dépôt Git
+                    git branch: "${BRANCH}", url: "${GIT_REPO}"
+                }
             }
         }
-        stage('Test') {
+
+        stage('Check .sh File') {
             steps {
-                sh 'mvn test'
+                script {
+                    // Vérifie si le fichier .sh existe et est exécutable
+                    def shFile = 'script.sh'
+                    if (fileExists(shFile)) {
+                        echo "Le fichier ${shFile} existe"
+                    } else {
+                        error "Le fichier ${shFile} n'existe pas dans le dépôt"
+                    }
+                    
+                    // Tester si le fichier est exécutable
+                    sh "chmod +x ${shFile}"
+                    
+                    // Optionnellement, tu peux ajouter des tests de syntaxe sur le fichier .sh
+                    sh "bash -n ${shFile}"
+                }
             }
         }
-        stage('Deploy') {
+
+        stage('Run Script') {
             steps {
-                sh 'scp target/app.war user@server:/path/to/deploy'
+                script {
+                    // Exécuter le fichier .sh
+                    sh './script.sh'
+                }
             }
+        }
+
+        stage('Commit and Push Changes') {
+            steps {
+                script {
+                    // Ajouter, commit et push les changements sur le dépôt Git
+                    sh 'git add .'
+                    sh 'git commit -m "Mise à jour après l'exécution du script" || echo "Aucun changement à pousser"'
+                    sh 'git push origin ${BRANCH}'
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Pipeline exécuté avec succès"
+        }
+        failure {
+            echo "Le pipeline a échoué"
         }
     }
 }
@@ -196,4 +266,50 @@ _Pré-requis_ :
 Utilisation du plugin "**Role-based Authorization Strategy**" afin de gérer les _rôles_ (groupes d'ensemble de users) et les _users_ eux-mêmes afin d'affecter des status (ex: développeurs, admin, etc) et des patterns de jobs à un rôle (ex: Java, Python).
 - Aller dans l'onglet "Administrer Jenkins" > "Security" et sélectionner "Stratégie basée sur les rôles" dans la liste déroulante de la section _Autorisations_ afin d'activer le plugin installé.
 - Pour ensuite créer des rôles et les gérer, se rendre dans l'onglet "Administrer Jenkins" > "Gérer les rôles". 
+
+### Triggers
+Mécanismes qui permettent de lancer automatiquement des jobs en réponse à un événement spécifique (ex: tâches planifiées, modifications de code, actions manuelles, etc). <br>
+Types de déclencheurs :
+- **Déclenchement basé sur les commits** (SCM Trigger : "GitHub hook trigger") : permet de lancer un job automatiquement lorsqu'un commit ou un push est effectué dans un dépôt Git, SVN, ou un autre système de gestion de version. 
+- **Déclenchement manuel** (Build Trigger) : déclencheur manuel permettant à un utilisateur de démarrer l'exécution d'un job à la demande en cliquant sur un bouton dans l'interface de Jenkins. 
+- **Déclenchement basé sur un timer** (Build Perfiodically) : lancement d'un job à intervalles réguliers, via un synthaxe CRON (ex: tous les jours à 2h00 via "H 2 * * *").
+- **Déclenchement par un webhook** (Webhook Trigger) : mécanisme qui permet à un autre système (ex: GitHub) de notifier Jenkins qu'une action a été effectuée (ex: commit, push). Par exemple, GitHub peut envoyer un webhook à Jenkins pour déclencher un job dès qu'une _pull request_ est ouverte.
+
+### Remote URL
+Permet de lancer un job via une autre machine ou bien un site web via l'option "**Déclencher les builds à distance**":
+- Créer un token 
+- Récupérer l'url générée en dessous qui servira de déclencheur lorsqu'elle sera appellée
+- Tester l'url et le job en recherche la page web : `$IP_VM;8080/job/$JOB_NAME/build?token=$TOKEN`
+
+### CRONs jobs
+Type de tâche planifiée qui permet d'exécuter un script, un programme, ou une commande à une heure spécifique ou selon un intervalle de temps définis (ex: mise à jour de base de données, envoi d'e-mails, gestion des sauvegardes). <br>
+
+Dans Jenkins, cette option est utilisable via "**Déclencher périodiquement**" et en renseignant une commande CRON. <br>
+
+_Exemple_ : 
+- Toutes les minutes : `* * * * *`
+- Toutes les 15 minutes : `H/15 * * *`
+- Tous les lundis à 13h : `00 13 * * l`
+
+### Les Vues
+Configurations permettant d'organiser et d'afficher des groupes de jobs de manière personnalisée et facilitant la gestion et la navigration au sein de Jenkins. Plus communément, elles intéragissent comme des filtres visuels lorsque de nombreux jobs sont en place. <br>
+
+Types de vues:
+- **Vue par défaut** (All Jobs View) : affiche tous les jobs de Jenkins sous forme de liste.
+- **Vue de type "List View"** (Liste des jobs) : permet de lister lesjobs sous forme de tableau, avec la possibilité de filtrer les jobs par différents critères (ex: nom, statut, etc).
+- **Vue "My Views"** (Vues personnelles) : vue destinée à l'utilisateur individuel. Chaque utilisateur peut avoir sa propre vue personnalisée, ce qui est utile dans les environnements où plusieurs équipes ou personnes utilisent Jenkins.
+- **Vue "Pipeline View"** (Vue Pipeline) : vue spécifique aux pipelines, permettant de visualiser l'état de différents jobs dans un pipeline. 
+- **Vue 'Dashboard View"** (Tbleau de bord personnalisé) : permet de créer des vues visuelles et interactives avec des widgets (ex: graphiques, tableaux, KPI) qui afichent des informations sur l'état des jobs, des builds et d'autres éléments.
+- **Vue "Nested View"** (Vue imbriquée) : permet de créer une hiérarchie de vues, où tu peux regrouper des jobs similaires sous des sous-vues. Utile lorsque l'on a de nombreux jobs organisés en catégories.
+- **Vue "Build Pipeline"** : permet de visualiser et suivre les étapes d'un pipeline de build. Elle permet de voir en un coup d'oeil l'état de chaque étape des processus CI/CD.
+
+
+### Configuration de "Delivery Pipeline"
+1) `+ Ajouter une nouvelle vue` sur la page principale
+2) Donner un nom à la vue tel que "Pipelines" et cocher l'option "Delivery Pipeline View"
+3) Ajouter des composants (ou jobs en cascades) en leur donnant un nom (ex: "first_pipeline")
+4) Cocher les options suivantes:
+- Enable start of new pipeline build
+- Enable manual triggers
+- Show absolute date and time
 
